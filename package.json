@@ -1,0 +1,61 @@
+{
+  "name": "red-flag-vetting-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for detecting nonprofit red flags: IRS revocation, OFAC sanctions, federal court records",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run format && npm run build && npm run lint && npm test"
+  },
+  "keywords": [
+    "mcp",
+    "nonprofit",
+    "red-flag",
+    "vetting",
+    "ofac",
+    "sanctions",
+    "irs-revocation",
+    "courtlistener",
+    "due-diligence",
+    "bonsaei"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "axios": "^1.13.2",
+    "csv-parse": "^5.6.0",
+    "dotenv": "^17.2.3",
+    "unzipper": "^0.12.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^25.0.0",
+    "@types/unzipper": "^0.10.10",
+    "@typescript-eslint/eslint-plugin": "^8.47.0",
+    "@typescript-eslint/parser": "^8.47.0",
+    "@vitest/coverage-v8": "^4.0.15",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}
