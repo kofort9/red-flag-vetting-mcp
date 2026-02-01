@@ -5,20 +5,23 @@
  * after normalization rather than fuzzy matching.
  *
  * Normalization steps:
- * 1. Lowercase
- * 2. Strip punctuation (periods, commas, quotes, etc.)
- * 3. Remove "the" prefix
- * 4. Remove org suffixes (inc, corp, foundation, etc.)
- * 5. Collapse whitespace
+ * 1. Unicode NFD normalization + diacritic stripping
+ * 2. Lowercase
+ * 3. Strip punctuation (periods, commas, quotes, etc.)
+ * 4. Remove "the" prefix
+ * 5. Strip trailing organizational suffixes only
+ * 6. Collapse whitespace
  */
 
+// Only true organizational suffixes that never carry semantic meaning
+// as part of a proper name. Words like "national", "institute", "fund",
+// "trust", "society", "group", "international" are intentionally excluded
+// because they appear as meaningful name components (e.g., "National Wildlife Fund").
 const ORG_SUFFIXES = [
   'incorporated',
   'inc',
   'corporation',
   'corp',
-  'foundation',
-  'fdn',
   'association',
   'assoc',
   'assn',
@@ -31,27 +34,23 @@ const ORG_SUFFIXES = [
   'lp',
   'co',
   'company',
-  'trust',
-  'fund',
-  'society',
-  'institute',
-  'group',
-  'international',
-  'intl',
-  'national',
-  'natl',
   'nfp',
   'pbc',
 ];
 
-// Build a regex to match any suffix at word boundary at end of string
-const SUFFIX_PATTERN = new RegExp(
-  `\\b(${ORG_SUFFIXES.join('|')})\\b`,
-  'gi'
+// Match suffixes only at the END of the string, preceded by a space.
+// Applied iteratively to strip stacked suffixes like "inc ltd".
+const TRAILING_SUFFIX_PATTERN = new RegExp(
+  `\\s+(${ORG_SUFFIXES.join('|')})$`,
+  'i'
 );
 
 export function normalizeName(name: string): string {
-  let normalized = name.toLowerCase();
+  // Unicode NFD normalization: decompose accented chars, then strip combining marks
+  // e.g., "José" → "Jose", "Müller" → "Muller"
+  let normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  normalized = normalized.toLowerCase();
 
   // Strip punctuation (keep alphanumeric and spaces)
   normalized = normalized.replace(/[^a-z0-9\s]/g, '');
@@ -59,8 +58,15 @@ export function normalizeName(name: string): string {
   // Remove "the" prefix
   normalized = normalized.replace(/^the\s+/, '');
 
-  // Remove org suffixes
-  normalized = normalized.replace(SUFFIX_PATTERN, '');
+  // Strip trailing org suffixes iteratively (handles "corp inc" stacking)
+  // Cap iterations to prevent pathological inputs from causing excessive looping
+  let prev: string;
+  let iterations = 0;
+  do {
+    prev = normalized;
+    normalized = normalized.replace(TRAILING_SUFFIX_PATTERN, '');
+    iterations++;
+  } while (normalized !== prev && iterations < 10);
 
   // Collapse whitespace and trim
   normalized = normalized.replace(/\s+/g, ' ').trim();

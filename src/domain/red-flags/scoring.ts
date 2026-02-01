@@ -1,7 +1,6 @@
 import {
   RedFlag,
   RedFlagSeverity,
-  RedFlagSource,
   Recommendation,
   IrsRevocationResult,
   OfacSanctionsResult,

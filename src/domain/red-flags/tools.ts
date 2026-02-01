@@ -4,7 +4,7 @@ import { CourtListenerClient } from './courtlistener-client.js';
 import { CsvDataStore } from './csv-loader.js';
 import { aggregateFlags, getRecommendation } from './scoring.js';
 import { generateSummary } from './messages.js';
-import { logDebug, logError } from '../../core/logging.js';
+import { logDebug, logError, getErrorMessage } from '../../core/logging.js';
 import {
   ToolResponse,
   RedFlagReport,
@@ -21,62 +21,47 @@ import {
 const ATTRIBUTION =
   'Data from IRS Auto-Revocation List, US Treasury OFAC SDN List, and CourtListener (Free Law Project)';
 
-// Security: Input length limits
 const MAX_NAME_LENGTH = 500;
 const MAX_EIN_LENGTH = 20;
 
-// ============================================================================
-// Tool: check_red_flags (composite)
-// ============================================================================
+function validationError<T>(message: string): ToolResponse<T> {
+  return { success: false, error: message, attribution: ATTRIBUTION };
+}
 
 export async function checkRedFlags(
   irsClient: IrsRevocationClient,
   ofacClient: OfacSdnClient,
-  courtClient: CourtListenerClient,
+  courtClient: CourtListenerClient | null,
   input: CheckRedFlagsInput
 ): Promise<ToolResponse<RedFlagReport>> {
   try {
-    if (!input.ein || !input.name) {
-      return {
-        success: false,
-        error: 'Both ein and name are required',
-        attribution: ATTRIBUTION,
-      };
+    const ein = input.ein?.trim();
+    const name = input.name?.trim();
+    if (!ein || !name) {
+      return validationError('Both ein and name are required');
+    }
+    if (ein.length > MAX_EIN_LENGTH) {
+      return validationError(`EIN too long (max ${MAX_EIN_LENGTH} characters)`);
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      return validationError(`Name too long (max ${MAX_NAME_LENGTH} characters)`);
     }
 
-    if (input.ein.length > MAX_EIN_LENGTH) {
-      return {
-        success: false,
-        error: `EIN too long (max ${MAX_EIN_LENGTH} characters)`,
-        attribution: ATTRIBUTION,
-      };
-    }
+    logDebug(`Checking red flags for ${name} (EIN: ${ein})`);
 
-    if (input.name.length > MAX_NAME_LENGTH) {
-      return {
-        success: false,
-        error: `Name too long (max ${MAX_NAME_LENGTH} characters)`,
-        attribution: ATTRIBUTION,
-      };
-    }
-
-    logDebug(`Checking red flags for ${input.name} (EIN: ${input.ein})`);
-
-    // Run all 3 checks in parallel
-    // IRS + OFAC are instant Map lookups; CourtListener is ~500ms
-    const [irsResult, ofacResult, courtResult] = await Promise.all([
-      Promise.resolve(irsClient.check(input.ein)),
-      Promise.resolve(ofacClient.check(input.name)),
-      courtClient.searchByOrgName(input.name),
-    ]);
+    const irsResult = irsClient.check(ein);
+    const ofacResult = ofacClient.check(name);
+    const courtResult = courtClient
+      ? await courtClient.searchByOrgName(name)
+      : { found: false, detail: 'Court record checks not configured (no CourtListener API token)', caseCount: 0, cases: [] };
 
     const flags = aggregateFlags(irsResult, ofacResult, courtResult);
     const recommendation = getRecommendation(flags);
     const summary = generateSummary(flags, recommendation, 3);
 
     const report: RedFlagReport = {
-      ein: input.ein,
-      name: input.name,
+      ein,
+      name,
       checks: {
         irs_revocation: irsResult,
         ofac_sanctions: ofacResult,
@@ -87,163 +72,87 @@ export async function checkRedFlags(
       summary,
     };
 
-    return {
-      success: true,
-      data: report,
-      attribution: ATTRIBUTION,
-    };
+    return { success: true, data: report, attribution: ATTRIBUTION };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     logError('checkRedFlags failed:', message);
-    return {
-      success: false,
-      error: `Red flag check failed: ${message}`,
-      attribution: ATTRIBUTION,
-    };
+    return validationError(`Red flag check failed: ${message}`);
   }
 }
-
-// ============================================================================
-// Tool: check_irs_revocation
-// ============================================================================
 
 export function checkIrsRevocation(
   irsClient: IrsRevocationClient,
   input: CheckIrsRevocationInput
 ): ToolResponse<IrsRevocationResult> {
   try {
-    if (!input.ein) {
-      return {
-        success: false,
-        error: 'EIN is required',
-        attribution: ATTRIBUTION,
-      };
+    const ein = input.ein?.trim();
+    if (!ein) {
+      return validationError('EIN is required');
+    }
+    if (ein.length > MAX_EIN_LENGTH) {
+      return validationError(`EIN too long (max ${MAX_EIN_LENGTH} characters)`);
     }
 
-    if (input.ein.length > MAX_EIN_LENGTH) {
-      return {
-        success: false,
-        error: `EIN too long (max ${MAX_EIN_LENGTH} characters)`,
-        attribution: ATTRIBUTION,
-      };
-    }
-
-    const result = irsClient.check(input.ein);
-
-    return {
-      success: true,
-      data: result,
-      attribution: ATTRIBUTION,
-    };
+    const result = irsClient.check(ein);
+    return { success: true, data: result, attribution: ATTRIBUTION };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     logError('checkIrsRevocation failed:', message);
-    return {
-      success: false,
-      error: `IRS revocation check failed: ${message}`,
-      attribution: ATTRIBUTION,
-    };
+    return validationError(`IRS revocation check failed: ${message}`);
   }
 }
-
-// ============================================================================
-// Tool: check_ofac_sanctions
-// ============================================================================
 
 export function checkOfacSanctions(
   ofacClient: OfacSdnClient,
   input: CheckOfacSanctionsInput
 ): ToolResponse<OfacSanctionsResult> {
   try {
-    if (!input.name) {
-      return {
-        success: false,
-        error: 'Name is required',
-        attribution: ATTRIBUTION,
-      };
+    const name = input.name?.trim();
+    if (!name) {
+      return validationError('Name is required');
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      return validationError(`Name too long (max ${MAX_NAME_LENGTH} characters)`);
     }
 
-    if (input.name.length > MAX_NAME_LENGTH) {
-      return {
-        success: false,
-        error: `Name too long (max ${MAX_NAME_LENGTH} characters)`,
-        attribution: ATTRIBUTION,
-      };
-    }
-
-    const result = ofacClient.check(input.name);
-
-    return {
-      success: true,
-      data: result,
-      attribution: ATTRIBUTION,
-    };
+    const result = ofacClient.check(name);
+    return { success: true, data: result, attribution: ATTRIBUTION };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     logError('checkOfacSanctions failed:', message);
-    return {
-      success: false,
-      error: `OFAC sanctions check failed: ${message}`,
-      attribution: ATTRIBUTION,
-    };
+    return validationError(`OFAC sanctions check failed: ${message}`);
   }
 }
 
-// ============================================================================
-// Tool: check_court_records
-// ============================================================================
-
 export async function checkCourtRecords(
-  courtClient: CourtListenerClient,
+  courtClient: CourtListenerClient | null,
   input: CheckCourtRecordsInput
 ): Promise<ToolResponse<CourtRecordsResult>> {
   try {
-    if (!input.name) {
-      return {
-        success: false,
-        error: 'Name is required',
-        attribution: ATTRIBUTION,
-      };
+    if (!courtClient) {
+      return validationError('Court record checks not configured (no CourtListener API token)');
+    }
+    const name = input.name?.trim();
+    if (!name) {
+      return validationError('Name is required');
+    }
+    if (name.length > MAX_NAME_LENGTH) {
+      return validationError(`Name too long (max ${MAX_NAME_LENGTH} characters)`);
     }
 
-    if (input.name.length > MAX_NAME_LENGTH) {
-      return {
-        success: false,
-        error: `Name too long (max ${MAX_NAME_LENGTH} characters)`,
-        attribution: ATTRIBUTION,
-      };
-    }
-
-    const lookbackYears = input.lookback_years ?? 1;
+    const lookbackYears = Math.floor(input.lookback_years ?? 1);
     if (lookbackYears < 1 || lookbackYears > 10) {
-      return {
-        success: false,
-        error: 'lookback_years must be between 1 and 10',
-        attribution: ATTRIBUTION,
-      };
+      return validationError('lookback_years must be between 1 and 10');
     }
 
-    const result = await courtClient.searchByOrgName(input.name, lookbackYears);
-
-    return {
-      success: true,
-      data: result,
-      attribution: ATTRIBUTION,
-    };
+    const result = await courtClient.searchByOrgName(name, lookbackYears);
+    return { success: true, data: result, attribution: ATTRIBUTION };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     logError('checkCourtRecords failed:', message);
-    return {
-      success: false,
-      error: `Court records check failed: ${message}`,
-      attribution: ATTRIBUTION,
-    };
+    return validationError(`Court records check failed: ${message}`);
   }
 }
-
-// ============================================================================
-// Tool: refresh_data
-// ============================================================================
 
 export async function refreshData(
   store: CsvDataStore,
@@ -254,19 +163,10 @@ export async function refreshData(
     logDebug(`Refreshing data: ${source}`);
 
     const result = await store.refresh(source);
-
-    return {
-      success: true,
-      data: result,
-      attribution: ATTRIBUTION,
-    };
+    return { success: true, data: result, attribution: ATTRIBUTION };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = getErrorMessage(error);
     logError('refreshData failed:', message);
-    return {
-      success: false,
-      error: `Data refresh failed: ${message}`,
-      attribution: ATTRIBUTION,
-    };
+    return validationError(`Data refresh failed: ${message}`);
   }
 }

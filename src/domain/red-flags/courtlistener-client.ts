@@ -3,10 +3,6 @@ import { RedFlagConfig } from '../../core/config.js';
 import { logDebug, logError, logWarn } from '../../core/logging.js';
 import { CourtListenerCase, CourtRecordsResult } from './types.js';
 
-// ============================================================================
-// Rate Limiter (same pattern as grassroot-vetting-mcp)
-// ============================================================================
-
 class RateLimiter {
   private lastRequestTime = 0;
   private readonly delayMs: number;
@@ -30,10 +26,6 @@ class RateLimiter {
   }
 }
 
-// ============================================================================
-// CourtListener API response types
-// ============================================================================
-
 interface CourtListenerSearchResponse {
   count: number;
   next: string | null;
@@ -51,10 +43,6 @@ interface CourtListenerDocket {
   absolute_url: string;
 }
 
-// ============================================================================
-// Client
-// ============================================================================
-
 export class CourtListenerClient {
   private client: AxiosInstance;
   private rateLimiter: RateLimiter;
@@ -70,6 +58,9 @@ export class CourtListenerClient {
         'User-Agent': 'red-flag-vetting-mcp/1.0',
       },
       timeout: 30000,
+      // Prevent axios from following redirects, which would forward
+      // the Authorization header to potentially untrusted hosts.
+      maxRedirects: 0,
     });
 
     this.client.interceptors.request.use(
@@ -107,24 +98,18 @@ export class CourtListenerClient {
   ): Promise<CourtRecordsResult> {
     await this.rateLimiter.waitIfNeeded();
 
-    if (!name || name.trim().length === 0) {
-      return {
-        found: false,
-        detail: 'No name provided for court records check',
-        caseCount: 0,
-        cases: [],
-      };
-    }
-
     // Calculate lookback date
     const lookbackDate = new Date();
     lookbackDate.setFullYear(lookbackDate.getFullYear() - lookbackYears);
     const dateAfter = lookbackDate.toISOString().split('T')[0]; // YYYY-MM-DD
 
     try {
+      // Strip Solr query syntax characters to prevent query injection
+      const sanitizedName = name.replace(/[\\"+\-!(){}[\]^~*?:/]/g, '');
+
       const response = await this.client.get<CourtListenerSearchResponse>('/search/', {
         params: {
-          q: `"${name}"`,
+          q: `"${sanitizedName}"`,
           type: 'r', // dockets (case records)
           filed_after: dateAfter,
           order_by: 'dateFiled desc',

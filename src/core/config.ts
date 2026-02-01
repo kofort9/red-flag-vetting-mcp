@@ -7,7 +7,7 @@ dotenv.config();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface RedFlagConfig {
-  courtlistenerApiToken: string;
+  courtlistenerApiToken?: string;
   courtlistenerBaseUrl: string;
   courtlistenerRateLimitMs: number;
   dataDir: string;
@@ -18,12 +18,7 @@ export interface RedFlagConfig {
 const COURTLISTENER_BASE_URL = 'https://www.courtlistener.com/api/rest/v4';
 
 export function loadConfig(): RedFlagConfig {
-  const token = process.env.COURTLISTENER_API_TOKEN;
-  if (!token) {
-    throw new Error(
-      'COURTLISTENER_API_TOKEN is required. Get a free token at https://www.courtlistener.com/sign-in/'
-    );
-  }
+  const token = process.env.COURTLISTENER_API_TOKEN || undefined;
 
   return {
     courtlistenerApiToken: token,

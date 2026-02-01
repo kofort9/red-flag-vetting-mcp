@@ -10,14 +10,6 @@ export class OfacSdnClient {
   }
 
   check(name: string): OfacSanctionsResult {
-    if (!name || name.trim().length === 0) {
-      return {
-        found: false,
-        detail: 'No name provided for OFAC check',
-        matches: [],
-      };
-    }
-
     const rows = this.store.lookupName(name);
 
     if (rows.length === 0) {
@@ -28,8 +20,8 @@ export class OfacSdnClient {
       };
     }
 
+    const normalized = normalizeName(name);
     const matches: OfacMatch[] = rows.map((row) => {
-      const normalized = normalizeName(name);
       const primaryNormalized = normalizeName(row.name);
       const matchedOn = normalized === primaryNormalized ? 'primary' : 'alias';
 

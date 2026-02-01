@@ -5,13 +5,9 @@ import axios from 'axios';
 import { parse } from 'csv-parse/sync';
 import * as unzipper from 'unzipper';
 import { RedFlagConfig } from '../../core/config.js';
-import { logInfo, logError, logDebug, logWarn } from '../../core/logging.js';
+import { logInfo, logError, logDebug, logWarn, getErrorMessage } from '../../core/logging.js';
 import { IrsRevocationRow, OfacSdnRow, OfacAltRow, DataManifest } from './types.js';
 import { normalizeName } from './name-normalizer.js';
-
-// ============================================================================
-// Constants
-// ============================================================================
 
 const IRS_REVOCATION_URL = 'https://apps.irs.gov/pub/epostcard/data-download-revocation.zip';
 const OFAC_SDN_URL = 'https://www.treasury.gov/ofac/downloads/sdn.csv';
@@ -19,22 +15,21 @@ const OFAC_ALT_URL = 'https://www.treasury.gov/ofac/downloads/alt.csv';
 
 const MANIFEST_FILE = 'data-manifest.json';
 
-// ============================================================================
-// CsvDataStore
-// ============================================================================
+// Safety limits to prevent zip bomb / data poisoning
+const MAX_ZIP_SIZE_BYTES = 100 * 1024 * 1024; // 100MB uncompressed limit
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;  // 50MB download limit
+const MIN_IRS_ROWS = 400_000;  // IRS list has ~600K rows; below this suggests corruption
+const MIN_OFAC_ENTRIES = 4_000; // OFAC SDN has ~12K entries; below this suggests corruption
+const REFRESH_COOLDOWN_MS = 60_000; // Minimum 60s between refresh calls
 
 export class CsvDataStore {
   private irsMap = new Map<string, IrsRevocationRow>();
   private ofacNameMap = new Map<string, OfacSdnRow[]>();
   private config: RedFlagConfig;
-  private initialized = false;
+  private lastRefreshAt = 0;
 
   constructor(config: RedFlagConfig) {
     this.config = config;
-  }
-
-  get isInitialized(): boolean {
-    return this.initialized;
   }
 
   get irsRowCount(): number {
@@ -44,10 +39,6 @@ export class CsvDataStore {
   get ofacEntryCount(): number {
     return this.ofacNameMap.size;
   }
-
-  // --------------------------------------------------------------------------
-  // Public API
-  // --------------------------------------------------------------------------
 
   async initialize(): Promise<void> {
     await fsp.mkdir(this.config.dataDir, { recursive: true });
@@ -68,28 +59,29 @@ export class CsvDataStore {
       await this.parseOfacFromDisk();
     }
 
-    this.initialized = true;
     logInfo(
       `Data loaded: ${this.irsMap.size} IRS revocations, ${this.ofacNameMap.size} OFAC entries`
     );
   }
 
   async refresh(source?: 'irs' | 'ofac' | 'all'): Promise<{ irs_refreshed: boolean; ofac_refreshed: boolean }> {
+    const now = Date.now();
+    const elapsed = now - this.lastRefreshAt;
+    if (elapsed < REFRESH_COOLDOWN_MS) {
+      const waitSec = Math.ceil((REFRESH_COOLDOWN_MS - elapsed) / 1000);
+      throw new Error(`Refresh cooldown: try again in ${waitSec}s`);
+    }
+
     const manifest = await this.loadManifest();
-    let irsRefreshed = false;
-    let ofacRefreshed = false;
+    const target = source ?? 'all';
+    const refreshIrs = target === 'irs' || target === 'all';
+    const refreshOfac = target === 'ofac' || target === 'all';
 
-    if (source === 'irs' || source === 'all' || !source) {
-      await this.downloadAndParseIrs(manifest);
-      irsRefreshed = true;
-    }
+    if (refreshIrs) await this.downloadAndParseIrs(manifest);
+    if (refreshOfac) await this.downloadAndParseOfac(manifest);
 
-    if (source === 'ofac' || source === 'all' || !source) {
-      await this.downloadAndParseOfac(manifest);
-      ofacRefreshed = true;
-    }
-
-    return { irs_refreshed: irsRefreshed, ofac_refreshed: ofacRefreshed };
+    this.lastRefreshAt = Date.now();
+    return { irs_refreshed: refreshIrs, ofac_refreshed: refreshOfac };
   }
 
   lookupEin(ein: string): IrsRevocationRow | undefined {
@@ -102,10 +94,6 @@ export class CsvDataStore {
     return this.ofacNameMap.get(normalized) || [];
   }
 
-  // --------------------------------------------------------------------------
-  // IRS Revocation
-  // --------------------------------------------------------------------------
-
   private async downloadAndParseIrs(manifest: DataManifest): Promise<void> {
     logInfo('Downloading IRS revocation list...');
     const zipPath = path.join(this.config.dataDir, 'irs-revocation.zip');
@@ -115,6 +103,8 @@ export class CsvDataStore {
       const response = await axios.get(IRS_REVOCATION_URL, {
         responseType: 'arraybuffer',
         timeout: 120000, // 2 min — file is ~15MB
+        maxContentLength: MAX_DOWNLOAD_BYTES,
+        maxBodyLength: MAX_DOWNLOAD_BYTES,
       });
 
       await fsp.writeFile(zipPath, Buffer.from(response.data));
@@ -126,13 +116,37 @@ export class CsvDataStore {
       }
 
       const file = directory.files[0];
+
+      // Guard against zip bombs: check uncompressed size before extracting
+      if (file.uncompressedSize && file.uncompressedSize > MAX_ZIP_SIZE_BYTES) {
+        throw new Error(
+          `IRS ZIP entry too large: ${file.uncompressedSize} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`
+        );
+      }
+
       const content = await file.buffer();
+
+      // Guard against zip bombs: verify actual extracted size (header can be spoofed)
+      if (content.length > MAX_ZIP_SIZE_BYTES) {
+        throw new Error(
+          `IRS ZIP extracted content too large: ${content.length} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`
+        );
+      }
+
       await fsp.writeFile(csvPath, content);
 
-      // Parse
-      this.irsMap = this.parseIrsCsv(content.toString('utf-8'));
+      // Parse into local var -- don't touch live data until validated
+      const newMap = this.parseIrsCsv(content.toString('utf-8'));
 
-      // Update manifest
+      if (newMap.size < MIN_IRS_ROWS) {
+        throw new Error(
+          `IRS data too small: ${newMap.size} rows (expected >= ${MIN_IRS_ROWS})`
+        );
+      }
+
+      // Validation passed -- swap atomically
+      this.irsMap = newMap;
+
       manifest.irs_revocation = {
         downloaded_at: new Date().toISOString(),
         row_count: this.irsMap.size,
@@ -141,7 +155,7 @@ export class CsvDataStore {
 
       logInfo(`IRS revocation list loaded: ${this.irsMap.size} entries`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = getErrorMessage(error);
       logError('Failed to download IRS revocation list:', msg);
       // Fall back to disk if available
       if (fs.existsSync(csvPath)) {
@@ -163,10 +177,16 @@ export class CsvDataStore {
     }
 
     const content = await fsp.readFile(csvPath, 'utf-8');
-    this.irsMap = this.parseIrsCsv(content);
+    const loaded = this.parseIrsCsv(content);
+    if (loaded.size < MIN_IRS_ROWS) {
+      logWarn(`Cached IRS data suspiciously small: ${loaded.size} rows (expected >= ${MIN_IRS_ROWS})`);
+    }
+    this.irsMap = loaded;
     logDebug(`IRS data loaded from disk: ${this.irsMap.size} entries`);
   }
 
+  // IRS file is pipe-delimited (not CSV), so we use manual splitting
+  // instead of csv-parse. This also avoids overhead for ~600K rows.
   private parseIrsCsv(content: string): Map<string, IrsRevocationRow> {
     const map = new Map<string, IrsRevocationRow>();
     const lines = content.split('\n');
@@ -202,10 +222,6 @@ export class CsvDataStore {
     return map;
   }
 
-  // --------------------------------------------------------------------------
-  // OFAC SDN
-  // --------------------------------------------------------------------------
-
   private async downloadAndParseOfac(manifest: DataManifest): Promise<void> {
     logInfo('Downloading OFAC SDN lists...');
     const sdnPath = path.join(this.config.dataDir, 'sdn.csv');
@@ -213,8 +229,18 @@ export class CsvDataStore {
 
     try {
       const [sdnResponse, altResponse] = await Promise.all([
-        axios.get(OFAC_SDN_URL, { responseType: 'text', timeout: 60000 }),
-        axios.get(OFAC_ALT_URL, { responseType: 'text', timeout: 60000 }),
+        axios.get(OFAC_SDN_URL, {
+          responseType: 'text',
+          timeout: 60000,
+          maxContentLength: MAX_DOWNLOAD_BYTES,
+          maxBodyLength: MAX_DOWNLOAD_BYTES,
+        }),
+        axios.get(OFAC_ALT_URL, {
+          responseType: 'text',
+          timeout: 60000,
+          maxContentLength: MAX_DOWNLOAD_BYTES,
+          maxBodyLength: MAX_DOWNLOAD_BYTES,
+        }),
       ]);
 
       await Promise.all([
@@ -225,7 +251,17 @@ export class CsvDataStore {
       const sdnRows = this.parseSdnCsv(sdnResponse.data);
       const altRows = this.parseAltCsv(altResponse.data);
 
-      this.ofacNameMap = this.buildOfacNameMap(sdnRows, altRows);
+      // Parse into local var -- don't touch live data until validated
+      const newMap = this.buildOfacNameMap(sdnRows, altRows);
+
+      if (newMap.size < MIN_OFAC_ENTRIES) {
+        throw new Error(
+          `OFAC data too small: ${newMap.size} entries (expected >= ${MIN_OFAC_ENTRIES})`
+        );
+      }
+
+      // Validation passed -- swap atomically
+      this.ofacNameMap = newMap;
 
       manifest.ofac_sdn = {
         downloaded_at: new Date().toISOString(),
@@ -236,7 +272,7 @@ export class CsvDataStore {
 
       logInfo(`OFAC loaded: ${sdnRows.length} SDN entries, ${altRows.length} aliases`);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = getErrorMessage(error);
       logError('Failed to download OFAC lists:', msg);
       if (fs.existsSync(sdnPath) && fs.existsSync(altPath)) {
         logWarn('Falling back to cached OFAC data');
@@ -264,7 +300,11 @@ export class CsvDataStore {
 
     const sdnRows = this.parseSdnCsv(sdnContent);
     const altRows = this.parseAltCsv(altContent);
-    this.ofacNameMap = this.buildOfacNameMap(sdnRows, altRows);
+    const loaded = this.buildOfacNameMap(sdnRows, altRows);
+    if (loaded.size < MIN_OFAC_ENTRIES) {
+      logWarn(`Cached OFAC data suspiciously small: ${loaded.size} entries (expected >= ${MIN_OFAC_ENTRIES})`);
+    }
+    this.ofacNameMap = loaded;
     logDebug(`OFAC data loaded from disk: ${this.ofacNameMap.size} entries`);
   }
 
@@ -355,10 +395,6 @@ export class CsvDataStore {
 
     return map;
   }
-
-  // --------------------------------------------------------------------------
-  // Manifest
-  // --------------------------------------------------------------------------
 
   private async loadManifest(): Promise<DataManifest> {
     const manifestPath = path.join(this.config.dataDir, MANIFEST_FILE);

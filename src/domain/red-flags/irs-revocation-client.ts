@@ -9,6 +9,8 @@ export class IrsRevocationClient {
   }
 
   check(ein: string): IrsRevocationResult {
+    // lookupEin normalizes (strips dashes/spaces), but we need the raw
+    // value to validate the 9-digit format before lookup.
     const normalized = ein.replace(/[-\s]/g, '');
 
     if (!/^\d{9}$/.test(normalized)) {
@@ -29,8 +31,7 @@ export class IrsRevocationClient {
       };
     }
 
-    // Check if reinstated
-    if (row.reinstatementDate && row.reinstatementDate.trim() !== '') {
+    if (row.reinstatementDate) {
       return {
         found: true,
         revoked: false,
