@@ -1,6 +1,6 @@
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
@@ -15,16 +15,24 @@ export interface RedFlagConfig {
 }
 
 // Security: Only allow official endpoints
-const COURTLISTENER_BASE_URL = 'https://www.courtlistener.com/api/rest/v4';
+const COURTLISTENER_BASE_URL = "https://www.courtlistener.com/api/rest/v4";
+
+function envInt(key: string, fallback: number): number {
+  const val = process.env[key];
+  if (val === undefined || val.trim() === "") return fallback;
+  const parsed = Number(val);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
 
 export function loadConfig(): RedFlagConfig {
-  const token = process.env.COURTLISTENER_API_TOKEN || undefined;
-
   return {
-    courtlistenerApiToken: token,
+    courtlistenerApiToken: process.env.COURTLISTENER_API_TOKEN || undefined,
     courtlistenerBaseUrl: COURTLISTENER_BASE_URL,
-    courtlistenerRateLimitMs: parseInt(process.env.COURTLISTENER_RATE_LIMIT_MS || '500', 10),
-    dataDir: path.resolve(__dirname, '../../data'),
-    dataMaxAgeDays: parseInt(process.env.DATA_MAX_AGE_DAYS || '7', 10),
+    courtlistenerRateLimitMs: Math.max(
+      100,
+      envInt("COURTLISTENER_RATE_LIMIT_MS", 500),
+    ),
+    dataDir: path.resolve(__dirname, "../../data"),
+    dataMaxAgeDays: Math.max(1, envInt("DATA_MAX_AGE_DAYS", 7)),
   };
 }

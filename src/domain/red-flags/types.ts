@@ -85,9 +85,12 @@ export interface CourtRecordsResult {
 // Composite Red Flag Types
 // ============================================================================
 
-export type RedFlagSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM';
-export type RedFlagSource = 'irs_revocation' | 'ofac_sanctions' | 'court_records';
-export type Recommendation = 'CLEAN' | 'FLAG' | 'BLOCK';
+export type RedFlagSeverity = "CRITICAL" | "HIGH" | "MEDIUM";
+export type RedFlagSource =
+  | "irs_revocation"
+  | "ofac_sanctions"
+  | "court_records";
+export type Recommendation = "CLEAN" | "FLAG" | "BLOCK";
 
 export interface RedFlag {
   severity: RedFlagSeverity;
@@ -168,5 +171,5 @@ export interface CheckCourtRecordsInput {
 }
 
 export interface RefreshDataInput {
-  source?: 'irs' | 'ofac' | 'all';
+  source?: "irs" | "ofac" | "all";
 }

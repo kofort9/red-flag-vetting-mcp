@@ -1,6 +1,6 @@
-import { CsvDataStore } from './csv-loader.js';
-import { OfacSanctionsResult, OfacMatch } from './types.js';
-import { normalizeName } from './name-normalizer.js';
+import { CsvDataStore } from "./csv-loader.js";
+import { OfacSanctionsResult, OfacMatch } from "./types.js";
+import { normalizeName } from "./name-normalizer.js";
 
 export class OfacSdnClient {
   private store: CsvDataStore;
@@ -15,7 +15,7 @@ export class OfacSdnClient {
     if (rows.length === 0) {
       return {
         found: false,
-        detail: 'No OFAC SDN matches found (good — not on sanctions list)',
+        detail: "No OFAC SDN matches found (good — not on sanctions list)",
         matches: [],
       };
     }
@@ -23,7 +23,7 @@ export class OfacSdnClient {
     const normalized = normalizeName(name);
     const matches: OfacMatch[] = rows.map((row) => {
       const primaryNormalized = normalizeName(row.name);
-      const matchedOn = normalized === primaryNormalized ? 'primary' : 'alias';
+      const matchedOn = normalized === primaryNormalized ? "primary" : "alias";
 
       return {
         entNum: row.entNum,

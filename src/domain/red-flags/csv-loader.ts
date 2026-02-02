@@ -1,24 +1,36 @@
-import fs from 'fs';
-import fsp from 'fs/promises';
-import path from 'path';
-import axios from 'axios';
-import { parse } from 'csv-parse/sync';
-import * as unzipper from 'unzipper';
-import { RedFlagConfig } from '../../core/config.js';
-import { logInfo, logError, logDebug, logWarn, getErrorMessage } from '../../core/logging.js';
-import { IrsRevocationRow, OfacSdnRow, OfacAltRow, DataManifest } from './types.js';
-import { normalizeName } from './name-normalizer.js';
+import fs from "fs";
+import fsp from "fs/promises";
+import path from "path";
+import axios from "axios";
+import { parse } from "csv-parse/sync";
+import * as unzipper from "unzipper";
+import { RedFlagConfig } from "../../core/config.js";
+import {
+  logInfo,
+  logError,
+  logDebug,
+  logWarn,
+  getErrorMessage,
+} from "../../core/logging.js";
+import {
+  IrsRevocationRow,
+  OfacSdnRow,
+  OfacAltRow,
+  DataManifest,
+} from "./types.js";
+import { normalizeName } from "./name-normalizer.js";
 
-const IRS_REVOCATION_URL = 'https://apps.irs.gov/pub/epostcard/data-download-revocation.zip';
-const OFAC_SDN_URL = 'https://www.treasury.gov/ofac/downloads/sdn.csv';
-const OFAC_ALT_URL = 'https://www.treasury.gov/ofac/downloads/alt.csv';
+const IRS_REVOCATION_URL =
+  "https://apps.irs.gov/pub/epostcard/data-download-revocation.zip";
+const OFAC_SDN_URL = "https://www.treasury.gov/ofac/downloads/sdn.csv";
+const OFAC_ALT_URL = "https://www.treasury.gov/ofac/downloads/alt.csv";
 
-const MANIFEST_FILE = 'data-manifest.json';
+const MANIFEST_FILE = "data-manifest.json";
 
 // Safety limits to prevent zip bomb / data poisoning
 const MAX_ZIP_SIZE_BYTES = 100 * 1024 * 1024; // 100MB uncompressed limit
-const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;  // 50MB download limit
-const MIN_IRS_ROWS = 400_000;  // IRS list has ~600K rows; below this suggests corruption
+const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024; // 50MB download limit
+const MIN_IRS_ROWS = 400_000; // IRS list has ~600K rows; below this suggests corruption
 const MIN_OFAC_ENTRIES = 4_000; // OFAC SDN has ~12K entries; below this suggests corruption
 const REFRESH_COOLDOWN_MS = 60_000; // Minimum 60s between refresh calls
 
@@ -60,11 +72,13 @@ export class CsvDataStore {
     }
 
     logInfo(
-      `Data loaded: ${this.irsMap.size} IRS revocations, ${this.ofacNameMap.size} OFAC entries`
+      `Data loaded: ${this.irsMap.size} IRS revocations, ${this.ofacNameMap.size} OFAC entries`,
     );
   }
 
-  async refresh(source?: 'irs' | 'ofac' | 'all'): Promise<{ irs_refreshed: boolean; ofac_refreshed: boolean }> {
+  async refresh(
+    source?: "irs" | "ofac" | "all",
+  ): Promise<{ irs_refreshed: boolean; ofac_refreshed: boolean }> {
     const now = Date.now();
     const elapsed = now - this.lastRefreshAt;
     if (elapsed < REFRESH_COOLDOWN_MS) {
@@ -73,9 +87,9 @@ export class CsvDataStore {
     }
 
     const manifest = await this.loadManifest();
-    const target = source ?? 'all';
-    const refreshIrs = target === 'irs' || target === 'all';
-    const refreshOfac = target === 'ofac' || target === 'all';
+    const target = source ?? "all";
+    const refreshIrs = target === "irs" || target === "all";
+    const refreshOfac = target === "ofac" || target === "all";
 
     if (refreshIrs) await this.downloadAndParseIrs(manifest);
     if (refreshOfac) await this.downloadAndParseOfac(manifest);
@@ -85,7 +99,7 @@ export class CsvDataStore {
   }
 
   lookupEin(ein: string): IrsRevocationRow | undefined {
-    const normalized = ein.replace(/[-\s]/g, '');
+    const normalized = ein.replace(/[-\s]/g, "");
     return this.irsMap.get(normalized);
   }
 
@@ -95,13 +109,13 @@ export class CsvDataStore {
   }
 
   private async downloadAndParseIrs(manifest: DataManifest): Promise<void> {
-    logInfo('Downloading IRS revocation list...');
-    const zipPath = path.join(this.config.dataDir, 'irs-revocation.zip');
-    const csvPath = path.join(this.config.dataDir, 'irs-revocation.csv');
+    logInfo("Downloading IRS revocation list...");
+    const zipPath = path.join(this.config.dataDir, "irs-revocation.zip");
+    const csvPath = path.join(this.config.dataDir, "irs-revocation.csv");
 
     try {
       const response = await axios.get(IRS_REVOCATION_URL, {
-        responseType: 'arraybuffer',
+        responseType: "arraybuffer",
         timeout: 120000, // 2 min — file is ~15MB
         maxContentLength: MAX_DOWNLOAD_BYTES,
         maxBodyLength: MAX_DOWNLOAD_BYTES,
@@ -112,7 +126,7 @@ export class CsvDataStore {
       // Extract ZIP
       const directory = await unzipper.Open.file(zipPath);
       if (directory.files.length === 0) {
-        throw new Error('IRS ZIP file is empty');
+        throw new Error("IRS ZIP file is empty");
       }
 
       const file = directory.files[0];
@@ -120,7 +134,7 @@ export class CsvDataStore {
       // Guard against zip bombs: check uncompressed size before extracting
       if (file.uncompressedSize && file.uncompressedSize > MAX_ZIP_SIZE_BYTES) {
         throw new Error(
-          `IRS ZIP entry too large: ${file.uncompressedSize} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`
+          `IRS ZIP entry too large: ${file.uncompressedSize} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`,
         );
       }
 
@@ -129,18 +143,18 @@ export class CsvDataStore {
       // Guard against zip bombs: verify actual extracted size (header can be spoofed)
       if (content.length > MAX_ZIP_SIZE_BYTES) {
         throw new Error(
-          `IRS ZIP extracted content too large: ${content.length} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`
+          `IRS ZIP extracted content too large: ${content.length} bytes (limit: ${MAX_ZIP_SIZE_BYTES})`,
         );
       }
 
       await fsp.writeFile(csvPath, content);
 
       // Parse into local var -- don't touch live data until validated
-      const newMap = this.parseIrsCsv(content.toString('utf-8'));
+      const newMap = this.parseIrsCsv(content.toString("utf-8"));
 
       if (newMap.size < MIN_IRS_ROWS) {
         throw new Error(
-          `IRS data too small: ${newMap.size} rows (expected >= ${MIN_IRS_ROWS})`
+          `IRS data too small: ${newMap.size} rows (expected >= ${MIN_IRS_ROWS})`,
         );
       }
 
@@ -156,10 +170,10 @@ export class CsvDataStore {
       logInfo(`IRS revocation list loaded: ${this.irsMap.size} entries`);
     } catch (error) {
       const msg = getErrorMessage(error);
-      logError('Failed to download IRS revocation list:', msg);
+      logError("Failed to download IRS revocation list:", msg);
       // Fall back to disk if available
       if (fs.existsSync(csvPath)) {
-        logWarn('Falling back to cached IRS data');
+        logWarn("Falling back to cached IRS data");
         await this.parseIrsFromDisk();
       } else {
         throw new Error(`Cannot load IRS revocation data: ${msg}`);
@@ -168,7 +182,7 @@ export class CsvDataStore {
   }
 
   private async parseIrsFromDisk(): Promise<void> {
-    const csvPath = path.join(this.config.dataDir, 'irs-revocation.csv');
+    const csvPath = path.join(this.config.dataDir, "irs-revocation.csv");
     if (!fs.existsSync(csvPath)) {
       // No cached data — need to download
       const manifest = await this.loadManifest();
@@ -176,10 +190,12 @@ export class CsvDataStore {
       return;
     }
 
-    const content = await fsp.readFile(csvPath, 'utf-8');
+    const content = await fsp.readFile(csvPath, "utf-8");
     const loaded = this.parseIrsCsv(content);
     if (loaded.size < MIN_IRS_ROWS) {
-      logWarn(`Cached IRS data suspiciously small: ${loaded.size} rows (expected >= ${MIN_IRS_ROWS})`);
+      logWarn(
+        `Cached IRS data suspiciously small: ${loaded.size} rows (expected >= ${MIN_IRS_ROWS})`,
+      );
     }
     this.irsMap = loaded;
     logDebug(`IRS data loaded from disk: ${this.irsMap.size} entries`);
@@ -189,31 +205,31 @@ export class CsvDataStore {
   // instead of csv-parse. This also avoids overhead for ~600K rows.
   private parseIrsCsv(content: string): Map<string, IrsRevocationRow> {
     const map = new Map<string, IrsRevocationRow>();
-    const lines = content.split('\n');
+    const lines = content.split("\n");
 
     // Skip header line
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
-      const fields = line.split('|');
+      const fields = line.split("|");
       if (fields.length < 11) continue;
 
-      const ein = fields[0].trim().replace(/[-\s]/g, '');
+      const ein = fields[0].trim().replace(/[-\s]/g, "");
       if (!/^\d{9}$/.test(ein)) continue;
 
       const row: IrsRevocationRow = {
         ein,
-        legalName: fields[1]?.trim() || '',
-        dba: fields[2]?.trim() || '',
-        city: fields[3]?.trim() || '',
-        state: fields[4]?.trim() || '',
-        zip: fields[5]?.trim() || '',
-        country: fields[6]?.trim() || '',
-        exemptionType: fields[7]?.trim() || '',
-        revocationDate: fields[8]?.trim() || '',
-        postingDate: fields[9]?.trim() || '',
-        reinstatementDate: fields[10]?.trim() || '',
+        legalName: fields[1]?.trim() || "",
+        dba: fields[2]?.trim() || "",
+        city: fields[3]?.trim() || "",
+        state: fields[4]?.trim() || "",
+        zip: fields[5]?.trim() || "",
+        country: fields[6]?.trim() || "",
+        exemptionType: fields[7]?.trim() || "",
+        revocationDate: fields[8]?.trim() || "",
+        postingDate: fields[9]?.trim() || "",
+        reinstatementDate: fields[10]?.trim() || "",
       };
 
       map.set(ein, row);
@@ -223,20 +239,20 @@ export class CsvDataStore {
   }
 
   private async downloadAndParseOfac(manifest: DataManifest): Promise<void> {
-    logInfo('Downloading OFAC SDN lists...');
-    const sdnPath = path.join(this.config.dataDir, 'sdn.csv');
-    const altPath = path.join(this.config.dataDir, 'alt.csv');
+    logInfo("Downloading OFAC SDN lists...");
+    const sdnPath = path.join(this.config.dataDir, "sdn.csv");
+    const altPath = path.join(this.config.dataDir, "alt.csv");
 
     try {
       const [sdnResponse, altResponse] = await Promise.all([
         axios.get(OFAC_SDN_URL, {
-          responseType: 'text',
+          responseType: "text",
           timeout: 60000,
           maxContentLength: MAX_DOWNLOAD_BYTES,
           maxBodyLength: MAX_DOWNLOAD_BYTES,
         }),
         axios.get(OFAC_ALT_URL, {
-          responseType: 'text',
+          responseType: "text",
           timeout: 60000,
           maxContentLength: MAX_DOWNLOAD_BYTES,
           maxBodyLength: MAX_DOWNLOAD_BYTES,
@@ -256,7 +272,7 @@ export class CsvDataStore {
 
       if (newMap.size < MIN_OFAC_ENTRIES) {
         throw new Error(
-          `OFAC data too small: ${newMap.size} entries (expected >= ${MIN_OFAC_ENTRIES})`
+          `OFAC data too small: ${newMap.size} entries (expected >= ${MIN_OFAC_ENTRIES})`,
         );
       }
 
@@ -270,12 +286,14 @@ export class CsvDataStore {
       };
       await this.saveManifest(manifest);
 
-      logInfo(`OFAC loaded: ${sdnRows.length} SDN entries, ${altRows.length} aliases`);
+      logInfo(
+        `OFAC loaded: ${sdnRows.length} SDN entries, ${altRows.length} aliases`,
+      );
     } catch (error) {
       const msg = getErrorMessage(error);
-      logError('Failed to download OFAC lists:', msg);
+      logError("Failed to download OFAC lists:", msg);
       if (fs.existsSync(sdnPath) && fs.existsSync(altPath)) {
-        logWarn('Falling back to cached OFAC data');
+        logWarn("Falling back to cached OFAC data");
         await this.parseOfacFromDisk();
       } else {
         throw new Error(`Cannot load OFAC data: ${msg}`);
@@ -284,8 +302,8 @@ export class CsvDataStore {
   }
 
   private async parseOfacFromDisk(): Promise<void> {
-    const sdnPath = path.join(this.config.dataDir, 'sdn.csv');
-    const altPath = path.join(this.config.dataDir, 'alt.csv');
+    const sdnPath = path.join(this.config.dataDir, "sdn.csv");
+    const altPath = path.join(this.config.dataDir, "alt.csv");
 
     if (!fs.existsSync(sdnPath) || !fs.existsSync(altPath)) {
       const manifest = await this.loadManifest();
@@ -294,15 +312,17 @@ export class CsvDataStore {
     }
 
     const [sdnContent, altContent] = await Promise.all([
-      fsp.readFile(sdnPath, 'utf-8'),
-      fsp.readFile(altPath, 'utf-8'),
+      fsp.readFile(sdnPath, "utf-8"),
+      fsp.readFile(altPath, "utf-8"),
     ]);
 
     const sdnRows = this.parseSdnCsv(sdnContent);
     const altRows = this.parseAltCsv(altContent);
     const loaded = this.buildOfacNameMap(sdnRows, altRows);
     if (loaded.size < MIN_OFAC_ENTRIES) {
-      logWarn(`Cached OFAC data suspiciously small: ${loaded.size} entries (expected >= ${MIN_OFAC_ENTRIES})`);
+      logWarn(
+        `Cached OFAC data suspiciously small: ${loaded.size} entries (expected >= ${MIN_OFAC_ENTRIES})`,
+      );
     }
     this.ofacNameMap = loaded;
     logDebug(`OFAC data loaded from disk: ${this.ofacNameMap.size} entries`);
@@ -322,12 +342,12 @@ export class CsvDataStore {
       if (record.length < 6) continue;
 
       rows.push({
-        entNum: record[0]?.trim() || '',
-        name: record[1]?.trim() || '',
-        sdnType: record[2]?.trim() || '',
-        program: record[3]?.trim() || '',
-        title: record[4]?.trim() || '',
-        remarks: record[5]?.trim() || '',
+        entNum: record[0]?.trim() || "",
+        name: record[1]?.trim() || "",
+        sdnType: record[2]?.trim() || "",
+        program: record[3]?.trim() || "",
+        title: record[4]?.trim() || "",
+        remarks: record[5]?.trim() || "",
       });
     }
 
@@ -347,11 +367,11 @@ export class CsvDataStore {
       if (record.length < 5) continue;
 
       rows.push({
-        entNum: record[0]?.trim() || '',
-        altNum: record[1]?.trim() || '',
-        altType: record[2]?.trim() || '',
-        altName: record[3]?.trim() || '',
-        altRemarks: record[4]?.trim() || '',
+        entNum: record[0]?.trim() || "",
+        altNum: record[1]?.trim() || "",
+        altType: record[2]?.trim() || "",
+        altName: record[3]?.trim() || "",
+        altRemarks: record[4]?.trim() || "",
       });
     }
 
@@ -360,7 +380,7 @@ export class CsvDataStore {
 
   private buildOfacNameMap(
     sdnRows: OfacSdnRow[],
-    altRows: OfacAltRow[]
+    altRows: OfacAltRow[],
   ): Map<string, OfacSdnRow[]> {
     const map = new Map<string, OfacSdnRow[]>();
 
@@ -399,7 +419,7 @@ export class CsvDataStore {
   private async loadManifest(): Promise<DataManifest> {
     const manifestPath = path.join(this.config.dataDir, MANIFEST_FILE);
     try {
-      const content = await fsp.readFile(manifestPath, 'utf-8');
+      const content = await fsp.readFile(manifestPath, "utf-8");
       return JSON.parse(content) as DataManifest;
     } catch {
       return {};
@@ -415,7 +435,8 @@ export class CsvDataStore {
     if (!downloadedAt) return true;
     const downloaded = new Date(downloadedAt);
     const now = new Date();
-    const diffDays = (now.getTime() - downloaded.getTime()) / (1000 * 60 * 60 * 24);
+    const diffDays =
+      (now.getTime() - downloaded.getTime()) / (1000 * 60 * 60 * 24);
     return diffDays > this.config.dataMaxAgeDays;
   }
 }

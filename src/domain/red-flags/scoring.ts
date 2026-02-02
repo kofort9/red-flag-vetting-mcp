@@ -5,21 +5,21 @@ import {
   IrsRevocationResult,
   OfacSanctionsResult,
   CourtRecordsResult,
-} from './types.js';
+} from "./types.js";
 
 export function aggregateFlags(
   irs: IrsRevocationResult,
   ofac: OfacSanctionsResult,
-  court: CourtRecordsResult
+  court: CourtRecordsResult,
 ): RedFlag[] {
   const flags: RedFlag[] = [];
 
   // IRS revocation = CRITICAL
   if (irs.revoked) {
     flags.push({
-      severity: 'CRITICAL',
-      source: 'irs_revocation',
-      type: 'tax_exempt_status_revoked',
+      severity: "CRITICAL",
+      source: "irs_revocation",
+      type: "tax_exempt_status_revoked",
       detail: irs.detail,
     });
   }
@@ -27,21 +27,21 @@ export function aggregateFlags(
   // OFAC match = CRITICAL
   if (ofac.found) {
     flags.push({
-      severity: 'CRITICAL',
-      source: 'ofac_sanctions',
-      type: 'sanctions_list_match',
+      severity: "CRITICAL",
+      source: "ofac_sanctions",
+      type: "sanctions_list_match",
       detail: ofac.detail,
     });
   }
 
   // Court records
   if (court.found) {
-    const severity: RedFlagSeverity = court.caseCount >= 3 ? 'HIGH' : 'MEDIUM';
+    const severity: RedFlagSeverity = court.caseCount >= 3 ? "HIGH" : "MEDIUM";
 
     flags.push({
       severity,
-      source: 'court_records',
-      type: 'federal_court_cases',
+      source: "court_records",
+      type: "federal_court_cases",
       detail: court.detail,
     });
   }
@@ -50,11 +50,11 @@ export function aggregateFlags(
 }
 
 export function getRecommendation(flags: RedFlag[]): Recommendation {
-  if (flags.some((f) => f.severity === 'CRITICAL')) {
-    return 'BLOCK';
+  if (flags.some((f) => f.severity === "CRITICAL")) {
+    return "BLOCK";
   }
   if (flags.length > 0) {
-    return 'FLAG';
+    return "FLAG";
   }
-  return 'CLEAN';
+  return "CLEAN";
 }

@@ -1,15 +1,15 @@
-import { RedFlag, Recommendation, RedFlagSummary } from './types.js';
+import { RedFlag, Recommendation, RedFlagSummary } from "./types.js";
 
 const HEADLINES: Record<Recommendation, string> = {
-  CLEAN: 'No Red Flags Detected',
-  FLAG: 'Red Flags Found — Manual Review Required',
-  BLOCK: 'CRITICAL Red Flags — Do Not Proceed',
+  CLEAN: "No Red Flags Detected",
+  FLAG: "Red Flags Found — Manual Review Required",
+  BLOCK: "CRITICAL Red Flags — Do Not Proceed",
 };
 
 export function generateSummary(
   flags: RedFlag[],
   recommendation: Recommendation,
-  sourcesChecked: number
+  sourcesChecked: number,
 ): RedFlagSummary {
   return {
     headline: HEADLINES[recommendation],

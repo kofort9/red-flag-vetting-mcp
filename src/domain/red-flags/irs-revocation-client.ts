@@ -1,5 +1,5 @@
-import { CsvDataStore } from './csv-loader.js';
-import { IrsRevocationResult } from './types.js';
+import { CsvDataStore } from "./csv-loader.js";
+import { IrsRevocationResult } from "./types.js";
 
 export class IrsRevocationClient {
   private store: CsvDataStore;
@@ -11,7 +11,7 @@ export class IrsRevocationClient {
   check(ein: string): IrsRevocationResult {
     // lookupEin normalizes (strips dashes/spaces), but we need the raw
     // value to validate the 9-digit format before lookup.
-    const normalized = ein.replace(/[-\s]/g, '');
+    const normalized = ein.replace(/[-\s]/g, "");
 
     if (!/^\d{9}$/.test(normalized)) {
       return {
@@ -27,7 +27,8 @@ export class IrsRevocationClient {
       return {
         found: false,
         revoked: false,
-        detail: 'EIN not found in IRS auto-revocation list (good — no revocation on record)',
+        detail:
+          "EIN not found in IRS auto-revocation list (good — no revocation on record)",
       };
     }
 

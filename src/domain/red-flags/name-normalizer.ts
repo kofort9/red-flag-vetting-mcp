@@ -18,45 +18,45 @@
 // "trust", "society", "group", "international" are intentionally excluded
 // because they appear as meaningful name components (e.g., "National Wildlife Fund").
 const ORG_SUFFIXES = [
-  'incorporated',
-  'inc',
-  'corporation',
-  'corp',
-  'association',
-  'assoc',
-  'assn',
-  'organization',
-  'org',
-  'limited',
-  'ltd',
-  'llc',
-  'llp',
-  'lp',
-  'co',
-  'company',
-  'nfp',
-  'pbc',
+  "incorporated",
+  "inc",
+  "corporation",
+  "corp",
+  "association",
+  "assoc",
+  "assn",
+  "organization",
+  "org",
+  "limited",
+  "ltd",
+  "llc",
+  "llp",
+  "lp",
+  "co",
+  "company",
+  "nfp",
+  "pbc",
 ];
 
 // Match suffixes only at the END of the string, preceded by a space.
 // Applied iteratively to strip stacked suffixes like "inc ltd".
 const TRAILING_SUFFIX_PATTERN = new RegExp(
-  `\\s+(${ORG_SUFFIXES.join('|')})$`,
-  'i'
+  `\\s+(${ORG_SUFFIXES.join("|")})$`,
+  "i",
 );
 
 export function normalizeName(name: string): string {
   // Unicode NFD normalization: decompose accented chars, then strip combining marks
   // e.g., "José" → "Jose", "Müller" → "Muller"
-  let normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  let normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   normalized = normalized.toLowerCase();
 
   // Strip punctuation (keep alphanumeric and spaces)
-  normalized = normalized.replace(/[^a-z0-9\s]/g, '');
+  normalized = normalized.replace(/[^a-z0-9\s]/g, "");
 
   // Remove "the" prefix
-  normalized = normalized.replace(/^the\s+/, '');
+  normalized = normalized.replace(/^the\s+/, "");
 
   // Strip trailing org suffixes iteratively (handles "corp inc" stacking)
   // Cap iterations to prevent pathological inputs from causing excessive looping
@@ -64,12 +64,12 @@ export function normalizeName(name: string): string {
   let iterations = 0;
   do {
     prev = normalized;
-    normalized = normalized.replace(TRAILING_SUFFIX_PATTERN, '');
+    normalized = normalized.replace(TRAILING_SUFFIX_PATTERN, "");
     iterations++;
   } while (normalized !== prev && iterations < 10);
 
   // Collapse whitespace and trim
-  normalized = normalized.replace(/\s+/g, ' ').trim();
+  normalized = normalized.replace(/\s+/g, " ").trim();
 
   return normalized;
 }
